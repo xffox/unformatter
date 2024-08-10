@@ -1,0 +1,17 @@
+set(NAME "unformatter")
+set(UNFORMATTER ${NAME})
+set(UNFORMATTER ${NAME} PARENT_SCOPE)
+
+set(INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/include")
+
+add_library(${NAME} INTERFACE)
+target_include_directories(${NAME} INTERFACE
+    "$<BUILD_INTERFACE:${INCLUDES}>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+
+install(TARGETS ${NAME} EXPORT UnformatterTargets
+    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(DIRECTORY "${INCLUDES}/"
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+add_subdirectory(test)
