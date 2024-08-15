@@ -10,7 +10,7 @@ file(GLOB SRCS "*.cpp")
 
 add_executable(${NAME} ${SRCS})
 target_link_libraries(${NAME}
-    PRIVATE ${UNFORMATTER} Catch2::Catch2WithMain)
+    PRIVATE ${UNFORMATTER_PRIV} Catch2::Catch2WithMain)
 
 catch_discover_tests(${NAME}
     DISCOVERY_MODE PRE_TEST)

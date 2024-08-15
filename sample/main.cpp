@@ -10,6 +10,7 @@
 #include <optional>
 #include <span>
 
+#include "unformatter/bit_unformatter.hpp"
 #include "unformatter/unformatter.hpp"
 
 namespace
@@ -67,13 +68,10 @@ std::optional<std::span<std::byte>> prepareIPv6Packet(
     const auto [fieldUnfmt, addressUnfmt] = headerUnfmt.split<8>();
     const auto [prefixUnfmt, controlUnfmt] = fieldUnfmt.split<4>();
     {
-        struct Prefix
-        {
-            std::uint32_t version : 4;
-            std::uint32_t trafficClass : 8;
-            std::uint32_t flowLabel : 20;
-        } prefix{};
-        prefixUnfmt.write<std::endian::big>(prefix);
+        const auto prefixBitUnfmt = unformatter::createBit(prefixUnfmt);
+        prefixBitUnfmt.subs<0, 4>().writeRepr(6);
+        prefixBitUnfmt.subs<4, 8>().writeRepr(0);
+        prefixBitUnfmt.subs<12>().writeRepr(0xdead);
     }
     const auto payloadLengthUnfmt = controlUnfmt.subs<0, 2>();
     payloadLengthUnfmt.write<std::endian::big, std::uint16_t>(data.size());

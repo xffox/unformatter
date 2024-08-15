@@ -8,50 +8,21 @@
 #include <concepts>
 #include <cstddef>
 #include <optional>
-#include <ranges>
 #include <span>
 #include <string_view>
 #include <system_error>
 #include <tuple>
 #include <type_traits>
 
+#include "unformatter/bit.hpp"
+#include "unformatter/inner/common.hpp"
+#include "unformatter/inner/util.hpp"
+#include "unformatter/size.hpp"
+
 namespace unformatter
 {
-struct DynamicSize
-{
-};
-template<std::size_t Start, std::size_t Size>
-struct RangeSize
-{
-    static constexpr auto start = Start;
-    static constexpr auto size = Size;
-};
-template<std::size_t Size>
-using StaticSize = RangeSize<Size, 1>;
-
 namespace inner
 {
-    template<typename S, template<std::size_t...> typename T>
-    struct IsSizedType : std::bool_constant<false>
-    {
-    };
-    template<template<std::size_t...> typename T, std::size_t... Sizes>
-    struct IsSizedType<T<Sizes...>, T> : std::bool_constant<true>
-    {
-    };
-
-    template<typename T>
-    struct LiteralOptional
-    {
-        constexpr LiteralOptional(T value) : value(value), null(false)
-        {
-        }
-        LiteralOptional() = default;
-
-        T value{};
-        bool null = true;
-    };
-
     template<typename D>
     requires std::constructible_from<std::string_view, D>
     constexpr auto prepareSpan(D &&data)
@@ -68,8 +39,8 @@ namespace inner
     }
 
     template<typename Left, typename Right>
-    requires(IsSizedType<Left, RangeSize>::value &&
-             IsSizedType<Right, RangeSize>::value)
+    requires(inner::util::IsSizedType<Left, RangeSize>::value &&
+             inner::util::IsSizedType<Right, RangeSize>::value)
     consteval bool isIntersectingRanges()
     {
         if(Left::start > Right::start)
@@ -86,10 +57,6 @@ namespace inner
         return sizeof(V) * Size;
     }
 
-    template<typename S>
-    concept SizeType =
-        std::same_as<S, DynamicSize> || inner::IsSizedType<S, RangeSize>::value;
-
     template<typename D>
     concept SpanLike = requires(D &&data) { prepareSpan(data); };
 
@@ -99,28 +66,31 @@ namespace inner
     };
 
     template<typename R>
-    requires inner::IsSizedType<R, RangeSize>::value
+    requires inner::util::IsSizedType<R, RangeSize>::value
     constexpr bool isInRange(const std::size_t val)
     {
         return val >= R::start && val - R::start < R::size;
     }
 }
 
-template<typename T, inner::SizeType S>
+template<typename T, SizeType S>
 class Unformatter;
 
 template<typename T>
 class Unformatter<T, DynamicSize>
 {
-    template<typename, inner::SizeType>
+    template<typename, SizeType>
     friend class Unformatter;
 
+    template<BitType, SizeType>
+    friend class BitUnformatter;
+
 public:
-    constexpr explicit Unformatter(std::span<T> data) : data_(data)
+    explicit constexpr Unformatter(std::span<T> data) : data_(data)
     {
     }
     template<inner::SpanLike D>
-    constexpr explicit Unformatter(D &&data) : data_(inner::prepareSpan(data))
+    explicit constexpr Unformatter(D &&data) : data_(inner::prepareSpan(data))
     {
     }
 
@@ -155,24 +125,12 @@ public:
     [[nodiscard]] constexpr std::optional<Unformatter> subs(
         std::size_t offset, std::optional<std::size_t> maybeSize = {}) const
     {
-        if(offset > data_.size())
+        if(const auto maybeSubsSize =
+               inner::common::subsSize(offset, maybeSize, data_.size()))
         {
-            return std::nullopt;
+            return Unformatter(data_.subspan(offset, *maybeSubsSize));
         }
-        std::size_t size{};
-        if(!maybeSize)
-        {
-            size = maybeSize.value_or(data_.size() - offset);
-        }
-        else
-        {
-            size = *maybeSize;
-            if(data_.size() - offset < size)
-            {
-                return std::nullopt;
-            }
-        }
-        return Unformatter(data_.subspan(offset, size));
+        return std::nullopt;
     }
 
     [[nodiscard]] std::optional<std::tuple<Unformatter, Unformatter>> split(
@@ -193,8 +151,9 @@ public:
             return std::nullopt;
         }
         V dst[1]{};
-        std::ranges::copy(asEndianBytes<Endian>(std::as_bytes(data_)),
-                          std::as_writable_bytes(std::span{dst}).begin());
+        std::ranges::copy(
+            inner::common::asEndianBytes<Endian>(std::as_bytes(data_)),
+            std::as_writable_bytes(std::span{dst}).begin());
         return dst[0];
     }
     template<std::endian Endian = std::endian::native, typename V>
@@ -218,8 +177,9 @@ public:
             return false;
         }
         const V src[1]{val};
-        std::ranges::copy(asEndianBytes<Endian>(std::as_bytes(std::span{src})),
-                          std::as_writable_bytes(data_).begin());
+        std::ranges::copy(
+            inner::common::asEndianBytes<Endian>(std::as_bytes(std::span{src})),
+            std::as_writable_bytes(data_).begin());
         return true;
     }
     template<std::endian Endian = std::endian::native, typename V>
@@ -267,32 +227,13 @@ protected:
 
 private:
     template<std::endian Endian>
-    static consteval bool isNativeEndianness()
-    {
-        return Endian == std::endian::native;
-    }
-
-    template<std::endian Endian>
-    static constexpr auto asEndianBytes(const auto bytes)
-    {
-        if constexpr(isNativeEndianness<Endian>())
-        {
-            return bytes;
-        }
-        else
-        {
-            return bytes | std::views::reverse;
-        }
-    }
-
-    template<std::endian Endian>
     static constexpr void copyBytes(std::span<std::byte> dst,
                                     std::span<const std::byte> src,
                                     const std::size_t chunkSize)
     {
         assert(src.size() == dst.size());
         assert(src.size() % chunkSize == 0);
-        if constexpr(isNativeEndianness<Endian>())
+        if constexpr(inner::common::isNativeEndianness<Endian>())
         {
             std::ranges::copy(src, dst.begin());
         }
@@ -301,9 +242,9 @@ private:
             for(auto offset = decltype(chunkSize){}; offset < src.size();
                 offset += chunkSize)
             {
-                std::ranges::copy(
-                    asEndianBytes<Endian>(src.subspan(offset, chunkSize)),
-                    dst.subspan(offset, chunkSize).begin());
+                std::ranges::copy(inner::common::asEndianBytes<Endian>(
+                                      src.subspan(offset, chunkSize)),
+                                  dst.subspan(offset, chunkSize).begin());
             }
         }
     }
@@ -313,7 +254,9 @@ template<typename T, std::size_t RngStart, std::size_t RngSize>
 class Unformatter<T, RangeSize<RngStart, RngSize>>
     : public Unformatter<T, DynamicSize>
 {
-    template<typename, inner::SizeType>
+    static_assert(std::is_trivial_v<T>);
+
+    template<typename, SizeType>
     friend class Unformatter;
 
     using SzType = RangeSize<RngStart, RngSize>;
@@ -396,10 +339,10 @@ public:
 
     using Unformatter<T, DynamicSize>::subs;
 
-    template<std::size_t Offset, inner::LiteralOptional<std::size_t> SubsSize =
-                                     inner::LiteralOptional<std::size_t>{}>
-    requires(Offset <= RngStart &&
-             (SubsSize.null || RngStart - Offset >= SubsSize.value))
+    template<std::size_t Offset,
+             inner::common::LiteralOptional<std::size_t> SubsSize =
+                 inner::common::LiteralOptional<std::size_t>{}>
+    requires(inner::common::isValidSubs(Offset, SubsSize, RngStart))
     constexpr auto subs() const
     {
         if constexpr(SubsSize.null)
