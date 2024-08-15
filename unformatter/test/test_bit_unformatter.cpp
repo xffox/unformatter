@@ -38,12 +38,18 @@ TEST_CASE("bit unformatter write repr", "[bit_unformatter]")
 
 TEST_CASE("bit unformatter static write repr", "[bit_unformatter]")
 {
-    std::uint32_t data{};
+    std::uint16_t data{};
     const auto dataUnfmt = unformatter::createBit(data);
     const auto rngUnfmt = dataUnfmt.subs<5, 9>();
-    // TODO: fix compiler error
-    //    rngUnfmt.writeRepr<0b101010101>();
-    //    REQUIRE(data == 0b10101010100000);
+    {
+        rngUnfmt.writeRepr<0b101010101>();
+        REQUIRE(data == 0b0101010000000101);
+    }
+    data = 0;
+    {
+        rngUnfmt.writeRepr<0b1101011>();
+        REQUIRE(data == 0b1010110000000001);
+    }
 }
 
 TEST_CASE("bit unformatter from unformatter", "[bit_unformatter]")

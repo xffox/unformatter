@@ -305,7 +305,8 @@ public:
 
     using BitUnformatter<B, DynamicSize>::writeRepr;
     template<auto Value>
-    requires(isRepresentable(Value, RngStart) && RngSize == 1)
+    requires(BitUnformatter<B, DynamicSize>::isRepresentable(Value, RngStart) &&
+             RngSize == 1)
     constexpr void writeRepr() const
     {
         [[maybe_unused]]
