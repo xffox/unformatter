@@ -12,7 +12,9 @@
 
 TEST_CASE("bit unformatter write", "[bit_unformatter]")
 {
-    std::uint16_t data{};
+    constexpr std::size_t SIZE = 2;
+    using DataArray = std::array<unsigned char, SIZE>;
+    DataArray data{};
     const auto dataUnfmt = unformatter::createBit(data);
     const std::uint8_t val{0b01101101};
     const auto valUnfmt = unformatter::createBit(val);
@@ -21,34 +23,38 @@ TEST_CASE("bit unformatter write", "[bit_unformatter]")
     const auto tgtUnfmt = *maybeTgtUnfmt;
     const auto res = tgtUnfmt.writeCollection(valUnfmt.subs(1).value());
     REQUIRE(res);
-    REQUIRE(data == 0b0100000000011011);
+    REQUIRE(data == DataArray{0b00011011, 0b01000000});
 }
 
 TEST_CASE("bit unformatter write repr", "[bit_unformatter]")
 {
-    std::uint16_t data{};
+    constexpr std::size_t SIZE = 2;
+    using DataArray = std::array<unsigned char, SIZE>;
+    DataArray data{};
     const auto dataUnfmt = unformatter::createBit(data);
     const auto maybeRngUnfmt = dataUnfmt.subs(5, 9);
     REQUIRE(maybeRngUnfmt);
     const auto rngUnfmt = *maybeRngUnfmt;
     REQUIRE(rngUnfmt.writeRepr(0b101010101));
-    REQUIRE(data == 0b0101010000000101);
+    REQUIRE(data == DataArray{0b00000101, 0b01010100});
     REQUIRE_FALSE(rngUnfmt.writeRepr(0b1010101011));
 }
 
 TEST_CASE("bit unformatter static write repr", "[bit_unformatter]")
 {
-    std::uint16_t data{};
+    constexpr std::size_t SIZE = 2;
+    using DataArray = std::array<unsigned char, SIZE>;
+    DataArray data{};
     const auto dataUnfmt = unformatter::createBit(data);
     const auto rngUnfmt = dataUnfmt.subs<5, 9>();
     {
         rngUnfmt.writeRepr<0b101010101>();
-        REQUIRE(data == 0b0101010000000101);
+        REQUIRE(data == DataArray{0b00000101, 0b01010100});
     }
-    data = 0;
+    data = {};
     {
         rngUnfmt.writeRepr<0b1101011>();
-        REQUIRE(data == 0b1010110000000001);
+        REQUIRE(data == DataArray{0b00000001, 0b10101100});
     }
 }
 

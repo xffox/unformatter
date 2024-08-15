@@ -19,6 +19,7 @@
         buildClang = buildPkg {stdenv = pkgs.clangStdenv;};
         buildCrossArm = buildPkgCross pkgs.pkgsCross.aarch64-multiplatform;
         buildCrossRisc = buildPkgCross pkgs.pkgsCross.riscv64;
+        buildCrossPpc = buildPkgCross pkgs.pkgsCross.ppc64;
       };
       devShells = {
         default = pkgs.callPackage ./nix/shell.nix { unformatter = self.packages.${system}.default; };
