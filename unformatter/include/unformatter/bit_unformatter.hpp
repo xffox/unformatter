@@ -27,6 +27,20 @@ class BitUnformatter<B, DynamicSize>
 {
     using MaxIntegralType = unsigned long long int;
 
+    template<typename Bt>
+    struct BitSpan
+    {
+        std::span<Bt> data;
+        std::size_t bitOffset;
+    };
+
+    template<typename ST>
+    struct DataSpan
+    {
+        ST data;
+        std::size_t bitOffset;
+    };
+
 public:
     template<typename V>
     requires std::is_trivial_v<V>
@@ -55,25 +69,24 @@ public:
                inner::common::subsSize(offset, maybeSize, size()))
         {
             auto resultData = data_;
-            auto resultBitOffset = bitOffset;
-            if(resultBitOffset != 0)
+            if(resultData.bitOffset != 0)
             {
-                const auto leftOffset = inner::bitutil::BYTE_BIT - bitOffset;
+                const auto leftOffset =
+                    inner::bitutil::BYTE_BIT - resultData.bitOffset;
                 if(offset >= leftOffset)
                 {
-                    resultData = resultData.subspan(1);
-                    resultBitOffset = 0;
+                    resultData.data = resultData.data.subspan(1);
+                    resultData.bitOffset = 0;
                     offset -= leftOffset;
                 }
                 else
                 {
-                    resultBitOffset += offset;
+                    resultData.bitOffset += offset;
                     offset = 0;
                 }
             }
-            resultData = resultData.subspan(offset / inner::bitutil::BYTE_BIT);
-            resultBitOffset += offset % inner::bitutil::BYTE_BIT;
-            return BitUnformatter(resultData, resultBitOffset, *maybeSubsSize);
+            resultData = advanceBit(resultData, offset);
+            return BitUnformatter(resultData, *maybeSubsSize);
         }
         return std::nullopt;
     }
@@ -105,7 +118,7 @@ public:
         {
             return false;
         }
-        copyBytes(data_, bitOffset, other.data_, other.bitOffset, bitSize);
+        copyBits(data_, other.data_, bitSize);
         return true;
     }
 
@@ -118,20 +131,25 @@ public:
         {
             return false;
         }
-        copyBytes(other.data_, other.bitOffset, data_, bitOffset, bitSize);
+        copyBits(other.data_, data_, bitSize);
         return true;
     }
 
     template<std::integral V>
     bool writeRepr(V val) const
     {
+        constexpr auto bytesRoundUp = [](const std::size_t bits) {
+            return (bits + inner::bitutil::BYTE_BIT - 1) /
+                   inner::bitutil::BYTE_BIT;
+        };
         if(!isRepresentable(val, bitSize))
         {
             return false;
         }
         const MaxIntegralType cur = val;
-        const auto byteSize =
-            (bitSize + inner::bitutil::BYTE_BIT - 1) / inner::bitutil::BYTE_BIT;
+        const auto curBitSize = std::min(
+            sizeof(MaxIntegralType) * inner::bitutil::BYTE_BIT, bitSize);
+        const auto byteSize = bytesRoundUp(curBitSize);
         const auto src = [&] {
             const auto bytes = std::as_bytes(std::span(&cur, 1));
             if constexpr(inner::common::isNativeEndianness<
@@ -144,11 +162,22 @@ public:
                 return bytes.subspan(bytes.size() - byteSize);
             }
         }();
-        copyBytes(
-            data_, bitOffset, src,
-            (inner::bitutil::BYTE_BIT - bitSize % inner::bitutil::BYTE_BIT) %
-                inner::bitutil::BYTE_BIT,
-            bitSize);
+        auto curSpan = data_;
+        if(const auto extraZeroBits = bitSize - curBitSize)
+        {
+            copyBits(curSpan,
+                     DataSpan{std::views::iota(bytesRoundUp(extraZeroBits)) |
+                                  std::views::transform(
+                                      [](const auto) { return std::byte{0}; }),
+                              0},
+                     extraZeroBits);
+            curSpan = advanceBit(curSpan, extraZeroBits);
+        }
+        copyBits(curSpan,
+                 DataSpan{src, (inner::bitutil::BYTE_BIT -
+                                curBitSize % inner::bitutil::BYTE_BIT) %
+                                   inner::bitutil::BYTE_BIT},
+                 curBitSize);
         return true;
     }
 
@@ -160,7 +189,7 @@ protected:
         const auto limitSize = sizeof(limit) * inner::bitutil::BYTE_BIT;
         if(bits > limitSize)
         {
-            return false;
+            return true;
         }
         limit >>= (limitSize - bits);
         return value >= 0 && static_cast<MaxIntegralType>(value) <= limit;
@@ -168,48 +197,49 @@ protected:
 
 private:
     explicit constexpr BitUnformatter(std::span<typename B::Byte> data)
-        : BitUnformatter(data, 0, data.size() * inner::bitutil::BYTE_BIT)
+        : BitUnformatter(BitSpan{data, 0},
+                         data.size() * inner::bitutil::BYTE_BIT)
     {
     }
 
-    constexpr BitUnformatter(std::span<typename B::Byte> data,
-                             std::size_t bitOffset, std::size_t bitSize)
-        : data_(data), bitOffset(bitOffset), bitSize(bitSize)
+    constexpr BitUnformatter(BitSpan<typename B::Byte> data,
+                             std::size_t bitSize)
+        : data_(data), bitSize(bitSize)
     {
     }
 
     template<typename Dst, typename Src>
-    static constexpr void copyBytes(const Dst &dst, std::size_t dstBitOffset,
-                                    const Src &src, std::size_t srcBitOffset,
-                                    std::size_t bitSize)
+    static constexpr void copyBits(const Dst &dst, const Src &src,
+                                   std::size_t bitSize)
     {
-        if(dstBitOffset == 0 && srcBitOffset == 0)
+        if(dst.bitOffset == 0 && src.bitOffset == 0)
         {
-            std::ranges::copy(src, std::ranges::begin(dst));
+            std::ranges::copy(src.data, std::ranges::begin(dst.data));
         }
         else
         {
-            auto srcIter = std::ranges::begin(src);
-            auto dstIter = std::ranges::begin(dst);
+            auto srcIter = std::ranges::begin(src.data);
+            auto dstIter = std::ranges::begin(dst.data);
             auto leftSize = bitSize;
             for(; leftSize > 0;
                 leftSize -= std::min(leftSize, inner::bitutil::BYTE_BIT),
                 ++srcIter, ++dstIter)
             {
                 const auto srcValChunk =
-                    inner::bitutil::BYTE_BIT - srcBitOffset;
+                    inner::bitutil::BYTE_BIT - src.bitOffset;
                 const auto val = inner::bitutil::combineBits(
-                    *srcIter << srcBitOffset, srcValChunk,
-                    (leftSize > srcValChunk && srcBitOffset != 0
+                    *srcIter << src.bitOffset, srcValChunk,
+                    (leftSize > srcValChunk && src.bitOffset != 0
                          ? (*(srcIter + 1) >> srcValChunk)
                          : std::byte{0}));
                 *(dstIter) = inner::bitutil::combineBits(
-                    *(dstIter), dstBitOffset, val >> dstBitOffset,
-                    std::min(dstBitOffset + leftSize, inner::bitutil::BYTE_BIT),
+                    *(dstIter), dst.bitOffset, val >> dst.bitOffset,
+                    std::min(dst.bitOffset + leftSize,
+                             inner::bitutil::BYTE_BIT),
                     *(dstIter));
                 const auto dstValChunk =
-                    inner::bitutil::BYTE_BIT - dstBitOffset;
-                if(leftSize > dstValChunk && dstBitOffset != 0)
+                    inner::bitutil::BYTE_BIT - dst.bitOffset;
+                if(leftSize > dstValChunk && dst.bitOffset != 0)
                 {
                     *(dstIter + 1) = inner::bitutil::combineBits(
                         val << dstValChunk,
@@ -221,9 +251,16 @@ private:
         }
     }
 
+    template<typename Bt>
+    static constexpr BitSpan<Bt> advanceBit(const BitSpan<Bt> &span,
+                                            const std::size_t offset)
+    {
+        return {span.data.subspan(offset / inner::bitutil::BYTE_BIT),
+                span.bitOffset + offset % inner::bitutil::BYTE_BIT};
+    }
+
 public:
-    std::span<typename B::Byte> data_;
-    std::size_t bitOffset;
+    BitSpan<typename B::Byte> data_;
     std::size_t bitSize;
 };
 

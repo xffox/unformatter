@@ -52,6 +52,26 @@ TEST_CASE("bit unformatter static write repr", "[bit_unformatter]")
     }
 }
 
+TEST_CASE("bit unformatter big write repr", "[bit_unformatter]")
+{
+    constexpr std::size_t SIZE = 17;
+    std::array<unsigned char, SIZE> data{};
+    std::ranges::fill(data, 0xff);
+    const auto dataUnfmt = unformatter::createBit(data);
+    constexpr std::size_t OFFSET = 5;
+    const auto rngUnfmt =
+        dataUnfmt.subs<OFFSET, SIZE * CHAR_BIT - OFFSET - 3>();
+    {
+        rngUnfmt.writeRepr<0b10110011101110>();
+        std::array<unsigned char, SIZE> exp{};
+        exp[0] = 0b11111000;
+        exp[SIZE - 3] = 0b00000001;
+        exp[SIZE - 2] = 0b01100111;
+        exp[SIZE - 1] = 0b01110111;
+        REQUIRE(data == exp);
+    }
+}
+
 TEST_CASE("bit unformatter from unformatter", "[bit_unformatter]")
 {
     constexpr std::size_t SZ = 3;
