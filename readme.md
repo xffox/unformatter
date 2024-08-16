@@ -2,7 +2,7 @@
 
 Utilities to work with structured data in a type safe manner. As much as possible statically known structure should be checked at compile time. Runtime known structure uses optional-like types.
 
-The utilities work with arrays of data. They allow to select subranges, read and write to the subranges, while keeping these operations checked at compile time or runtime.
+The utilities work with arrays of data. They allow to select subranges, read and write the subranges, while keeping these operations checked at compile time or runtime.
 
 ## Example
 
@@ -19,3 +19,11 @@ CMake is used for builds.
 ## Nix
 
 The project can also be used as a Nix flake.
+
+Build as
+
+    nix build 'github:xffox/unformatter'
+
+or
+
+    nix build 'github:xffox/unformatter#buildClang'
